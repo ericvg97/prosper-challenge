@@ -11,9 +11,6 @@ from openai import AsyncOpenAI
 from playwright.async_api import async_playwright, Browser, Page
 from loguru import logger
 
-_browser: Browser | None = None
-_page: Page | None = None
-
 client = AsyncOpenAI()
 
 async def login_to_healthie() -> Page:
@@ -30,7 +27,6 @@ async def login_to_healthie() -> Page:
         ValueError: If required environment variables are missing.
         Exception: If login fails for any reason.
     """
-    global _browser, _page
 
     email = os.environ.get("HEALTHIE_EMAIL")
     password = os.environ.get("HEALTHIE_PASSWORD")
@@ -38,44 +34,40 @@ async def login_to_healthie() -> Page:
     if not email or not password:
         raise ValueError("HEALTHIE_EMAIL and HEALTHIE_PASSWORD must be set in environment variables")
 
-    if _page is not None:
-        logger.info("Using existing Healthie session")
-        return _page
-
     logger.info("Logging into Healthie...")
     playwright = await async_playwright().start()
-    _browser = await playwright.chromium.launch(headless=False)
-    _page = await _browser.new_page()
+    browser = await playwright.chromium.launch(headless=False)
+    page = await browser.new_page()
 
-    await _page.goto("https://secure.gethealthie.com/users/sign_in", wait_until="domcontentloaded")
+    await page.goto("https://secure.gethealthie.com/users/sign_in", wait_until="domcontentloaded")
     
     # Wait for the email input to be visible
-    email_input = _page.locator('input[name="identifier"]')
+    email_input = page.locator('input[name="identifier"]')
     await email_input.wait_for(state="visible", timeout=30000)
     await email_input.fill(email)
 
-    first_login_button = _page.locator('button:has-text("Log In")')
+    first_login_button = page.locator('button:has-text("Log In")')
     await first_login_button.wait_for(state="visible", timeout=30000)
     await first_login_button.click()
 
     
     # Wait for password input
-    password_input = _page.locator('input[name="password"]')
+    password_input = page.locator('input[name="password"]')
     await password_input.wait_for(state="visible", timeout=30000)
     await password_input.fill(password)
     
     # Find and click the Log In button
-    submit_button = _page.locator('button:has-text("Log In")')
+    submit_button = page.locator('button:has-text("Log In")')
     await submit_button.wait_for(state="visible", timeout=30000)
    
-    async with _page.expect_response(
+    async with page.expect_response(
         lambda r: "auth/v1/user" in r.url and r.status == 200,
         timeout=15000,
     ):
         await submit_button.click()
 
     logger.info("Successfully logged into Healthie")
-    return _page
+    return page
 
 
 async def find_patient(name: str, date_of_birth: date) -> str | None:
