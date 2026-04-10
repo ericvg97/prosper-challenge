@@ -6,7 +6,6 @@ and appointment scheduling.
 
 import os
 from datetime import date, time as dt_time, datetime
-from time import sleep
 
 from openai import AsyncOpenAI
 from playwright.async_api import async_playwright, Browser, Page
@@ -15,6 +14,7 @@ from loguru import logger
 _browser: Browser | None = None
 _page: Page | None = None
 
+client = AsyncOpenAI()
 
 async def login_to_healthie() -> Page:
     """Log into Healthie and return an authenticated page instance.
@@ -67,117 +67,104 @@ async def login_to_healthie() -> Page:
     # Find and click the Log In button
     submit_button = _page.locator('button:has-text("Log In")')
     await submit_button.wait_for(state="visible", timeout=30000)
-    await submit_button.click()
-    
-    # Wait for navigation after login
-    await _page.wait_for_timeout(3000)
-    
-    # Check if we've navigated away from the sign-in page
-    current_url = _page.url
-    if "sign_in" in current_url:
-        raise Exception("Login may have failed - still on sign-in page")
+   
+    async with _page.expect_response(
+        lambda r: "auth/v1/user" in r.url and r.status == 200,
+        timeout=15000,
+    ):
+        await submit_button.click()
 
     logger.info("Successfully logged into Healthie")
     return _page
 
 
-async def find_patient(name: str, date_of_birth: str) -> dict | None:
+async def find_patient(name: str, date_of_birth: date) -> str | None:
     """Find a patient in Healthie by name and date of birth.
 
     Args:
         name: The patient's full name.
-        date_of_birth: The patient's date of birth in a format that Healthie accepts.
+        date_of_birth: The patient's date of birth.
 
     Returns:
-        dict | None: A dictionary containing patient information if found,
-            including at least a 'patient_id' field. Returns None if the patient
-            is not found or if an error occurs.
+        str | None: The patient's ID if found, returns None if the patient is not found.
 
-    Example return value:
-        {
-            "patient_id": "12345",
-            "name": "John Doe",
-            "date_of_birth": "1990-01-15",
-            ...
-        }
+    Raises:
+        Exception: If an error occurs.
     """
-    await login_to_healthie()
+    page = await login_to_healthie()
 
-    await _page.goto("https://secure.gethealthie.com/clients/active", wait_until="domcontentloaded")
+    await page.goto("https://secure.gethealthie.com/clients/active", wait_until="domcontentloaded")
 
     # Wait for search input
-    search_input = _page.locator('input[data-testid="search-input"]')
+    search_input = page.get_by_test_id("search-input")
     await search_input.wait_for(state="visible", timeout=30000)
 
-    await _page.wait_for_timeout(1000)
+    await page.wait_for_timeout(1000) # TO DO: Improve this. If we fill the input it too fast, the input is filled but it doesn't trigger a call to the API.
 
-    await search_input.fill(name)
+    await search_input.fill(f"{name} - {date_of_birth.isoformat()}")
 
-    await _page.wait_for_timeout(5000)
+    await page.wait_for_timeout(5000) # TO DO: Check if the API call has been made instead of just timing out
 
-    result_links = _page.locator("td.client-name-row a")
+    # Get the patients list in the search results
+    result_links = page.locator("td.client-name-row a")
     count = await result_links.count()
     logger.info(f"Found {count} search results for '{name}'")
 
-    if count == 0:
-        raise ValueError(f"No patients found for {name}")
-
-    patient_hrefs: list[str] = []
     for i in range(count):
         href = await result_links.nth(i).get_attribute("href")
-        if href:
-            patient_hrefs.append(href)
-
-    client = AsyncOpenAI()
-
-    for idx, href in enumerate(patient_hrefs):
-        await _page.goto(f"https://secure.gethealthie.com{href}", wait_until="domcontentloaded")
-
-        dob_el = _page.locator('[data-testid="client-dob"]')
-        await dob_el.wait_for(state="attached", timeout=10000)
-        dob_text = (await dob_el.text_content() or "").strip()
-
-        if not dob_text:
-            logger.info(f"Skipping result {idx + 1}/{len(patient_hrefs)}: no DOB on file")
+        if href is None:
             continue
 
-        name_el = _page.locator('.sidebar-full-name')
-        await name_el.wait_for(state="visible", timeout=10000)
-        found_name = await name_el.text_content()
+        patient_id =  href.split("/")[-1]
+        if await is_correct_patient(name, date_of_birth, patient_id, page):
+            return patient_id
 
-        logger.info(f"Checking result {idx + 1}/{len(patient_hrefs)}: {found_name}, DOB: {dob_text}")
+    return None
 
-        resp = await client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "user",
-                    "content": (
-                        "Do these refer to the same person? Dates must coincide, and name has to be the same. Example: \"John Doe\" is the same as \"John R. doe\" but not the same as \"John\" or \"Doe\". Answer only 'yes' or 'no'.\n"
-                        f"Input name: {name}\n"
-                        f"Input DOB: {date_of_birth}\n"
-                        f"Found name: {found_name}\n"
-                        f"Found DOB: {dob_text}"
-                    ),
-                }
-            ],
-        )
-        answer = resp.choices[0].message.content.strip().lower()
-        verified = answer == "yes"
-        logger.info(f"Patient verification for result {idx + 1}: {answer} (verified={verified})")
 
-        if verified:
-            return {
-                "patient_id": _page.url.split("/")[-1],
-                "name": found_name.strip() if found_name else name,
-                "date_of_birth": dob_text.strip() if dob_text else None,
+async def is_correct_patient(name: str, date_of_birth: date, patient_id: str, page: Page) -> bool:
+    await page.goto(f"https://secure.gethealthie.com/users/{patient_id}", wait_until="domcontentloaded")
+
+    dob_el = page.locator('[data-testid="client-dob"]')
+    await dob_el.wait_for(state="attached", timeout=10000)
+    dob_text = (await dob_el.text_content() or "").strip()
+
+    if not dob_text:
+        return False
+
+    try:
+        found_dob = datetime.strptime(dob_text, "%b %d, %Y").date()
+    except ValueError:
+        found_dob = None
+
+    if found_dob != date_of_birth:
+        return False
+
+    name_el = page.locator('.sidebar-full-name')
+    await name_el.wait_for(state="visible", timeout=10000)
+    found_name = await name_el.text_content()
+
+    resp = await client.chat.completions.create( # TO DO: Extract to an LLM Client
+        model="gpt-4o-mini",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "Do these two names refer to the same person? "
+                    "Example: \"John Doe\" is the same as \"John R. Doe\" but not the same as \"John\" or \"Doe\". "
+                    "Answer only 'yes' or 'no'.\n"
+                    f"Name 1: {name}\n"
+                    f"Name 2: {found_name}"
+                ),
             }
+        ],
+    )
+    answer = (resp.choices[0].message.content or "").strip().lower()
+    return answer == "yes"
 
-    raise ValueError(f"No matching patient found for {name} with DOB {date_of_birth}")
 
-
-async def create_appointment(patient_id: str, date: date, time: dt_time) -> dict | None:
-    """Create an appointment in Healthie for the specified patient.
+async def create_appointment(patient_id: str, date: date, time: dt_time) -> str:
+    """Create an appointment in Healthie for the specified patient and returns the appointment id
 
     Navigates to the patient's page, opens the appointment dialog, fills
     in the date, time, and appointment type fields, then submits the form.
@@ -188,8 +175,11 @@ async def create_appointment(patient_id: str, date: date, time: dt_time) -> dict
         time: The desired appointment time.
 
     Returns:
-        dict | None: A dictionary with patient_id, date, and time on success.
-            Returns None if appointment creation fails.
+        The appointment id.
+
+    Raises:
+        RuntimeError: If the appointment creation fails.
+
     """
     page = await login_to_healthie()
 
@@ -232,14 +222,28 @@ async def create_appointment(patient_id: str, date: date, time: dt_time) -> dict
 
     logger.info(f"Appointment fields filled for patient {patient_id}: {healthie_date} at {healthie_time}")
 
+    # Submit appointment
     submit_btn = page.get_by_test_id("appointment-form-modal").get_by_test_id("primaryButton")
     await submit_btn.wait_for(state="visible", timeout=10000)
-    await submit_btn.click()
 
-    logger.info(f"Appointment submitted for patient {patient_id}")
+    async with page.expect_response(
+        lambda r: r.url.endswith("/graphql")
+        and r.request.method == "POST"
+        and "createAppointment" in (r.request.post_data or ""),
+        timeout=15000,
+    ) as response_info:
+        await submit_btn.click()
 
-    return {
-        "patient_id": patient_id,
-        "date": date.isoformat(),
-        "time": time.isoformat(),
-    }
+
+    # Check graphql response was successful and obtain id
+    response = await response_info.value
+    body = await response.json()
+    gql_result = body[0] if isinstance(body, list) else body
+    appointment = gql_result.get("data", {}).get("createAppointment", {}).get("appointment")
+
+    if not appointment:
+        raise RuntimeError(f"Appointment creation failed: {gql_result}")
+
+    logger.info(f"Appointment created successfully (id={appointment.get('id')})")
+
+    return appointment.get("id")

@@ -25,7 +25,7 @@ from loguru import logger
 from pipecat_flows import FlowArgs, FlowManager, FlowResult, FlowsFunctionSchema, NodeConfig
 
 
-from nodes import create_initial_node
+from nodes import create_greet_and_collect_patient_info_node
 
 print("🚀 Starting Pipecat bot...")
 print("⏳ Loading models and imports (20 seconds, first run only)\n")
@@ -125,7 +125,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
-        await flow_manager.initialize(create_initial_node())
+        await flow_manager.initialize(create_greet_and_collect_patient_info_node())
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
