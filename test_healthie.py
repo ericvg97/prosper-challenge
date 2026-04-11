@@ -17,20 +17,18 @@ KNOWN_PATIENT_ID = "14791913"
 
 
 
+class TestFindPatient:
+    async def test_finds_existing_patient(self):
+        patient_id = await find_patient(KNOWN_PATIENT_NAME, KNOWN_PATIENT_DOB)
+        assert patient_id == KNOWN_PATIENT_ID
 
-# TO DO: When running all the tests together, playwright hangs for some reason.
-# class TestFindPatient:
-#     async def test_finds_existing_patient(self):
-#         patient_id = await find_patient(KNOWN_PATIENT_NAME, KNOWN_PATIENT_DOB)
-#         assert patient_id == KNOWN_PATIENT_ID
+    async def test_returns_none_for_unknown_patient(self):
+        patient_id = await find_patient("Nonexistent Person", date(1900, 1, 1))
+        assert patient_id is None
 
-#     async def test_returns_none_for_unknown_patient(self):
-#         patient_id = await find_patient("Nonexistent Person", date(1900, 1, 1))
-#         assert patient_id is None
-
-#     async def test_wrong_dob_returns_none(self):
-#         patient_id = await find_patient(KNOWN_PATIENT_NAME, date(1990, 1, 1))
-#         assert patient_id is None
+    async def test_wrong_dob_returns_none(self):
+        patient_id = await find_patient(KNOWN_PATIENT_NAME, date(1990, 1, 1))
+        assert patient_id is None
 
 
 class TestCreateAppointment:

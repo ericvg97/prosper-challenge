@@ -14,12 +14,11 @@
 # Known issues
 ## Engineering
 1. The voice agent is not tested
-2. The playwright bot is not correctly tested (I got some issues with the browser being shared between tests)
-3. The playwright bot, in some steps, relies on timeouts instead of more deterministic signals such as api responses
-4. In case of a provider (ElevenLabs or OpenAI) being down, the agent would be down.
-5. If I were to put playwright in production, I would add more logging (or even taking a screenshot in case of failure), so as to detect easily when the page has change and it is breaking the bot.  
-6. No monitoring: To put this agent in production we would require to understand how it is working, for example I would like to know the answer to: How many turns does the conversation take? How many times is there a state transition between this state and this other one? 
-7. The browser for playwright could be reused between usages of healthie.py. I removed the singletons to allow for concurrency, even if it means opening a new browser every time. 
+2. The playwright bot, in some steps, relies on timeouts instead of more deterministic signals such as api responses
+3. In case of a provider (ElevenLabs or OpenAI) being down, the agent would be down.
+4. If I were to put playwright in production, I would add more logging (or even taking a screenshot in case of failure), so as to detect easily when the page has change and it is breaking the bot.  
+5. No monitoring: To put this agent in production we would require to understand how it is working, for example I would like to know the answer to: How many turns does the conversation take? How many times is there a state transition between this state and this other one? 
+6. The browser for playwright could be reused between usages of healthie.py. I removed the singletons to allow for concurrency, even if it means opening a new browser every time. 
 
 ## Product
 1. The LLM doesn't ask for the details again in case of not finding the patient or not being able to add an appointment. This would require better error handling in the playwright part so that the agent knows if it is an error with the data or with the bot or with healthie. It would also require adding transitions in the state machine to allow to go back to past states in case of the information provided being wrong.
