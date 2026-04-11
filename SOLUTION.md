@@ -32,7 +32,9 @@
 # Improvements
 ## Latency
 1. Pre-navigate to the patient page while the agent is asking about appointment details
-2. Moving from Playwright to GraphQL
+2. Log in to Healthie when starting the conversation (reusing the browser tabs would already help with this) 
+3. Moving from Playwright to GraphQL
+4. Syncing pacients from Healthie to our own database so that looking for a patient doesn't require going to Healthie.
 
 ## Reliability
 1. Moving to GraphQL
